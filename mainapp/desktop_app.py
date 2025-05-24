@@ -5,13 +5,89 @@ from tkinter import scrolledtext, ttk
 import threading
 from typing import Optional
 from tkinter import font as tkfont
+from PIL import Image, ImageTk
+import io
+import base64
+from dotenv import load_dotenv
+import os
+import nest_asyncio
+import queue
 
-from app.agent.manus import Manus
+from smart_agent import process_query
 from app.logger import logger
 
+# Load environment variables
+load_dotenv()
 
-class UdsopDesktopApp:
-    """Desktop application for the UdS_OP agent"""
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
+
+# Create a queue for thread communication
+response_queue = queue.Queue()
+
+# Create and set the event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+
+def run_async_task(coro):
+    """Run a coroutine in the main event loop"""
+    return asyncio.run_coroutine_threadsafe(coro, loop)
+
+
+def start_event_loop():
+    """Start the event loop in a separate thread"""
+    loop.run_forever()
+
+
+# Start the event loop in a separate thread
+threading.Thread(target=start_event_loop, daemon=True).start()
+
+
+class LoadingSpinner:
+    def __init__(self, canvas, x, y, size=20):
+        self.canvas = canvas
+        self.x = x
+        self.y = y
+        self.size = size
+        self.angle = 0
+        self.is_spinning = False
+        self.spinner_id = None
+
+    def start(self):
+        self.is_spinning = True
+        self._spin()
+
+    def stop(self):
+        self.is_spinning = False
+        if self.spinner_id:
+            self.canvas.after_cancel(self.spinner_id)
+            self.spinner_id = None
+        self.canvas.delete("spinner")
+
+    def _spin(self):
+        if not self.is_spinning:
+            return
+
+        self.canvas.delete("spinner")
+        # Draw spinner
+        for i in range(8):
+            angle = self.angle + (i * 45)
+            rad = angle * 3.14159 / 180
+            x1 = self.x + self.size * 0.5 * (1 - abs(i - 4) / 4) * (1 if i < 4 else -1)
+            y1 = self.y + self.size * 0.5 * (1 - abs(i - 4) / 4) * (1 if i < 4 else -1)
+            x2 = self.x + self.size * 0.8 * (1 - abs(i - 4) / 4) * (1 if i < 4 else -1)
+            y2 = self.y + self.size * 0.8 * (1 - abs(i - 4) / 4) * (1 if i < 4 else -1)
+            self.canvas.create_line(
+                x1, y1, x2, y2, fill="#0078d4", width=2, tags="spinner"
+            )
+
+        self.angle = (self.angle + 10) % 360
+        self.spinner_id = self.canvas.after(50, self._spin)
+
+
+class BuddyAIDesktopApp:
+    """Desktop application for the BuddyAI Assistant"""
 
     def __init__(self, root):
         self.root = root
@@ -34,10 +110,8 @@ class UdsopDesktopApp:
             "assistant_message_bg": "#2d2d2d",
         }
 
-        # Initialize the agent
-        self.agent = Manus()
         self.processing = False
-        self.web_mode = False
+        self.loading = False
 
         # Configure root window
         self.root.configure(bg=self.colors["bg"])
@@ -95,33 +169,13 @@ class UdsopDesktopApp:
             ],
         )
 
-        style.configure(
-            "Web.TButton",
-            background=self.colors["accent"],
-            foreground=self.colors["text"],
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0,
-        )
-
-        style.map(
-            "Web.TButton",
-            background=[
-                ("active", self.colors["button_hover"]),
-                ("pressed", self.colors["button_hover"]),
-            ],
-            foreground=[
-                ("active", self.colors["text"]),
-                ("pressed", self.colors["text"]),
-            ],
-        )
-
     def _create_ui(self):
         """Create the modern user interface"""
         # Main container
         main_frame = ttk.Frame(self.root, style="Modern.TFrame", padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Top bar with Web button
+        # Top bar with title
         top_frame = ttk.Frame(main_frame, style="Modern.TFrame")
         top_frame.pack(fill=tk.X, pady=(0, 20))
 
@@ -136,16 +190,6 @@ class UdsopDesktopApp:
         )
         title_label.pack(side=tk.LEFT)
 
-        # Web button
-        self.web_button = ttk.Button(
-            top_frame,
-            text="Web Mode",
-            command=self._toggle_web_mode,
-            style="Web.TButton",
-            padding=(15, 8),
-        )
-        self.web_button.pack(side=tk.RIGHT)
-
         # Chat area
         self.output_frame = ttk.LabelFrame(
             main_frame, text="Conversation", style="Modern.TLabelframe", padding="10"
@@ -155,6 +199,23 @@ class UdsopDesktopApp:
         # Custom font for chat
         chat_font = tkfont.Font(family="Segoe UI", size=10)
 
+        # Create loading canvas first
+        self.loading_canvas = tk.Canvas(
+            self.output_frame,
+            background=self.colors["bg"],
+            highlightthickness=0,
+            width=400,
+            height=300,
+        )
+
+        # Create spinner
+        self.spinner = LoadingSpinner(
+            self.loading_canvas,
+            self.loading_canvas.winfo_reqwidth() // 2,
+            self.loading_canvas.winfo_reqheight() // 2,
+        )
+
+        # Create output area
         self.output_area = scrolledtext.ScrolledText(
             self.output_frame,
             wrap=tk.WORD,
@@ -210,100 +271,6 @@ class UdsopDesktopApp:
         )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def _toggle_web_mode(self):
-        """Toggle web mode on/off"""
-        self.web_mode = not self.web_mode
-
-        if self.web_mode:
-            # Activate web mode
-            self.web_button.configure(text="Web Mode: ON", style="WebMode.TButton")
-            self.status_var.set("Web Mode: Type your browser instruction")
-            self._append_to_output(
-                "System: Web Mode activated. Your instructions will be executed in a browser."
-            )
-        else:
-            # Deactivate web mode
-            self.web_button.configure(text="Web", style="Web.TButton")
-            self.status_var.set("Ready")
-            self._append_to_output(
-                "System: Web Mode deactivated. Returning to normal assistant mode."
-            )
-
-    def _run_web_agent(self, user_instruction):
-        """Run the web browsing agent with the user's instruction"""
-        if self.processing:
-            return
-
-        self.processing = True
-        self.status_var.set("Running browser automation...")
-        self.web_button.configure(state=tk.DISABLED)
-        self._append_to_output("System: Launching browser automation...")
-
-        # Use a thread to avoid blocking the UI
-        threading.Thread(
-            target=self._execute_web_agent, args=(user_instruction,), daemon=True
-        ).start()
-
-    def _execute_web_agent(self, task):
-        """Execute the web browsing agent in a separate thread with the user's task"""
-        try:
-            # Create and run a new event loop for the thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            # Import and execute web browsing functionality
-            import sys
-            import os
-
-            # Add the parent directory to sys.path to find the webo module
-            parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if parent_dir not in sys.path:
-                sys.path.append(parent_dir)
-
-            try:
-                # Import the browser agent functionality
-                from webo.browser_use import Agent as BrowserAgent
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                from dotenv import load_dotenv
-
-                # Load environment variables and initialize LLM
-                load_dotenv()
-                llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
-
-                # Create and run the browser agent with the user's task
-                async def run_browser_task():
-                    agent = BrowserAgent(task=task, llm=llm, headless=False)
-                    await agent.run()
-
-                # Run the browser task
-                loop.run_until_complete(run_browser_task())
-                self.root.after(0, self._on_web_agent_success)
-            except Exception as e:
-                error_msg = f"Error running web agent: {str(e)}"
-                self.root.after(0, lambda: self._on_web_agent_error(error_msg))
-        finally:
-            loop.close()
-
-    def _on_web_agent_success(self):
-        """Handle successful web agent execution"""
-        self._append_to_output("System: Browser automation completed successfully.")
-        self.processing = False
-        self.status_var.set("Ready")
-        self.web_button.configure(state=tk.NORMAL)
-        # Reset web mode after completion
-        self.web_mode = False
-        self.web_button.configure(text="Web", style="Web.TButton")
-
-    def _on_web_agent_error(self, error_msg):
-        """Handle web agent execution error"""
-        self._append_to_output(f"Error: {error_msg}")
-        self.processing = False
-        self.status_var.set("Ready")
-        self.web_button.configure(state=tk.NORMAL)
-        # Reset web mode after completion
-        self.web_mode = False
-        self.web_button.configure(text="Web", style="Web.TButton")
-
     def _on_enter(self, event):
         """Handle Enter key press"""
         if not event.state & 0x4:  # If Ctrl is not pressed
@@ -314,6 +281,40 @@ class UdsopDesktopApp:
     def _insert_newline(self, event):
         """Handle Ctrl+Enter key press to insert a newline"""
         return None  # Allow default behavior (insert newline)
+
+    def _show_loading(self):
+        """Show loading spinner"""
+        self.loading = True
+        self.output_area.pack_forget()
+        self.loading_canvas.pack(fill=tk.BOTH, expand=True)
+        self.spinner.start()
+        self.status_var.set("Processing your request...")
+
+    def _hide_loading(self):
+        """Hide loading spinner"""
+        self.loading = False
+        self.spinner.stop()
+        self.loading_canvas.pack_forget()
+        self.output_area.pack(fill=tk.BOTH, expand=True)
+        self.status_var.set("Ready")
+
+    def _clean_output(self, text: str) -> str:
+        """Clean and format the output"""
+        try:
+            # Remove any system messages or processing indicators
+            text = re.sub(r"🔍.*?\.\.\.", "", text)
+            text = re.sub(r"✅.*?completed\.", "", text)
+            text = re.sub(r"System:.*?\n", "", text)
+
+            # Clean up extra whitespace
+            text = re.sub(r"\n\s*\n", "\n\n", text)
+            text = text.strip()
+
+            return text
+
+        except Exception as e:
+            logger.error(f"Error cleaning output: {str(e)}")
+            return text
 
     def _process_input(self):
         """Process the user's input"""
@@ -327,16 +328,11 @@ class UdsopDesktopApp:
         self._append_to_output(f"You: {user_input}")
         self.input_area.delete("1.0", tk.END)
 
-        # Check if we're in web mode
-        if self.web_mode:
-            # Run the web agent with the user's instruction
-            self._run_web_agent(user_input)
-            return
+        # Show loading state
+        self._show_loading()
 
         # Standard processing mode
-        # Disable UI during processing
         self.processing = True
-        self.status_var.set("Processing...")
         self.submit_button.configure(state=tk.DISABLED)
 
         # Use a thread to avoid blocking the UI
@@ -346,65 +342,34 @@ class UdsopDesktopApp:
 
     def _run_agent(self, user_input: str):
         """Run the agent in a separate thread"""
-        # Create and run a new event loop for the thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        # Create a future for the agent's response
-        output_collector = OutputCollector()
-
-        # Patch the agent's logger to capture output
-        original_info = logger.info
-        original_error = logger.error
-
         try:
-            # Override logger.info and logger.error
-            def capture_info(msg, *args, **kwargs):
-                original_info(msg, *args, **kwargs)
-                output_collector.add_output(msg)
+            # Schedule the process_query coroutine in the main event loop
+            future = run_async_task(process_query(user_input))
 
-            def capture_error(msg, *args, **kwargs):
-                original_error(msg, *args, **kwargs)
-                output_collector.add_output(f"Error: {msg}")
+            # Wait for the result
+            response = future.result(timeout=60)  # 60 second timeout
 
-            logger.info = capture_info
-            logger.error = capture_error
-
-            # Run the agent
-            loop.run_until_complete(self.agent.run(user_input))
-        except Exception as e:
-            output_collector.add_output(f"An error occurred: {str(e)}")
-        finally:
-            # Restore original logger methods
-            logger.info = original_info
-            logger.error = original_error
-            loop.close()
+            # Clean and format the response
+            cleaned_response = self._clean_output(response)
 
             # Update UI in main thread
-            self.root.after(
-                0, self._update_ui_after_processing, output_collector.get_output()
-            )
+            self.root.after(0, self._update_ui_after_processing, cleaned_response)
+
+        except Exception as e:
+            error_msg = f"An error occurred: {str(e)}"
+            self.root.after(0, lambda: self._update_ui_after_processing(error_msg))
 
     def _update_ui_after_processing(self, output: str):
         """Update the UI after processing is complete"""
-        # Extract only the answer part for all interactions
-        formatted_output = output
-
-        if output and "Request processing completed" in output:
-            # Extract the answer part between the processing messages
-            parts = output.split("🔍 Processing your request...")
-            if len(parts) > 1:
-                answer_parts = parts[1].split("✅ Request processing completed.")
-                if len(answer_parts) > 1:
-                    answer = answer_parts[0].strip()
-                    formatted_output = f"Assistant: {answer}"
+        # Hide loading state
+        self._hide_loading()
 
         # Add to conversation history
-        self._append_to_output(formatted_output)
+        if output:
+            self._append_to_output(f"Assistant: {output}")
 
         # Reset UI state
         self.processing = False
-        self.status_var.set("Ready")
         self.submit_button.configure(state=tk.NORMAL)
 
     def _append_to_output(self, text: str):
@@ -448,24 +413,16 @@ class UdsopDesktopApp:
         self.output_area.configure(state=tk.DISABLED)
 
 
-class OutputCollector:
-    """Helper class to collect output from the agent"""
-
-    def __init__(self):
-        self.output = []
-
-    def add_output(self, msg: str):
-        self.output.append(str(msg))
-
-    def get_output(self) -> str:
-        return "\n".join(self.output)
-
-
 def main():
     """Main entry point for the application"""
-    root = tk.Tk()
-    app = UdsopDesktopApp(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = BuddyAIDesktopApp(root)
+        root.mainloop()
+    finally:
+        # Clean up the event loop when the application closes
+        loop.call_soon_threadsafe(loop.stop)
+        loop.close()
 
 
 if __name__ == "__main__":

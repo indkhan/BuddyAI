@@ -11,10 +11,22 @@ load_dotenv()
 
 # Initialize agents
 gemini = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-preview-05-20",
-    temperature=0.7,
+    model="gemini-2.0-flash",
+    temperature=0.0,
     api_key=os.getenv("GOOGLE_API_KEY"),
 )
+
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-preview-05-20",
+    temperature=0.2,
+    api_key=os.getenv("GOOGLE_API_KEY"),
+    model_kwargs={
+        "system_prompt": "You are a helpful assistant that can answer questions and help with stuff"
+    },
+)
+
+
 manus = Manus()
 
 
@@ -36,7 +48,7 @@ async def process_query(query: str) -> str:
         if is_simple:
             logger.info("Using Gemini for simple query")
             # Use ainvoke for async operation
-            response = await gemini.ainvoke(query)
+            response = await llm.ainvoke(query)
             return response.content
         else:
             logger.info("Using Manus for complex task")

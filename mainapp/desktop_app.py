@@ -12,6 +12,12 @@ from dotenv import load_dotenv
 import os
 import nest_asyncio
 import queue
+import sounddevice as sd
+import soundfile as sf
+import numpy as np
+from groq import Groq
+import tempfile
+from datetime import datetime
 
 from smart_agent import process_query
 from app.logger import logger
@@ -29,6 +35,9 @@ response_queue = queue.Queue()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
+# Initialize Groq client
+groq_client = Groq()
+
 
 def run_async_task(coro):
     """Run a coroutine in the main event loop"""
@@ -42,6 +51,43 @@ def start_event_loop():
 
 # Start the event loop in a separate thread
 threading.Thread(target=start_event_loop, daemon=True).start()
+
+
+class AudioRecorder:
+    def __init__(self):
+        self.recording = False
+        self.frames = []
+        self.sample_rate = 44100
+        self.channels = 1
+
+    def start_recording(self):
+        self.recording = True
+        self.frames = []
+
+        def callback(indata, frames, time, status):
+            if status:
+                print(status)
+            if self.recording:
+                self.frames.append(indata.copy())
+
+        self.stream = sd.InputStream(
+            channels=self.channels, samplerate=self.sample_rate, callback=callback
+        )
+        self.stream.start()
+
+    def stop_recording(self):
+        self.recording = False
+        self.stream.stop()
+        self.stream.close()
+
+        # Convert frames to numpy array
+        audio_data = np.concatenate(self.frames, axis=0)
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            temp_filename = temp_file.name
+            sf.write(temp_filename, audio_data, self.sample_rate)
+            return temp_filename
 
 
 class LoadingSpinner:
@@ -95,6 +141,10 @@ class BuddyAIDesktopApp:
         self.root.geometry("1000x800")
         self.root.minsize(800, 600)
 
+        # Initialize audio recorder
+        self.audio_recorder = AudioRecorder()
+        self.is_recording = False
+
         # Set theme colors
         self.colors = {
             "bg": "#1e1e1e",
@@ -108,6 +158,7 @@ class BuddyAIDesktopApp:
             "message_bg": "#2d2d2d",
             "user_message_bg": "#0078d4",
             "assistant_message_bg": "#2d2d2d",
+            "mic_active": "#ff4444",
         }
 
         self.processing = False
@@ -230,9 +281,19 @@ class BuddyAIDesktopApp:
         )
         self.output_area.pack(fill=tk.BOTH, expand=True)
 
-        # Input area
+        # Input area with mic button
         input_frame = ttk.Frame(main_frame, style="Modern.TFrame")
         input_frame.pack(fill=tk.X)
+
+        # Create mic button
+        self.mic_button = ttk.Button(
+            input_frame,
+            text="🎤",
+            command=self._toggle_recording,
+            style="Modern.TButton",
+            padding=(10, 10),
+        )
+        self.mic_button.pack(side=tk.LEFT, padx=(0, 10))
 
         self.input_area = scrolledtext.ScrolledText(
             input_frame,
@@ -282,10 +343,61 @@ class BuddyAIDesktopApp:
         """Handle Ctrl+Enter key press to insert a newline"""
         return None  # Allow default behavior (insert newline)
 
+    def _toggle_recording(self):
+        """Toggle audio recording on/off"""
+        if not self.is_recording:
+            # Start recording
+            self.is_recording = True
+            self.mic_button.configure(text="⏹", style="Recording.TButton")
+            self.audio_recorder.start_recording()
+            self.status_var.set("Recording... Click again to stop.")
+        else:
+            # Stop recording
+            self.is_recording = False
+            self.mic_button.configure(text="🎤", style="Modern.TButton")
+            temp_filename = self.audio_recorder.stop_recording()
+            self.status_var.set("Processing audio...")
+
+            # Transcribe in a separate thread
+            threading.Thread(
+                target=self._transcribe_audio, args=(temp_filename,), daemon=True
+            ).start()
+
+    def _transcribe_audio(self, filename):
+        """Transcribe the recorded audio using Groq Whisper"""
+        try:
+            with open(filename, "rb") as file:
+                transcription = groq_client.audio.transcriptions.create(
+                    file=(filename, file.read()),
+                    model="whisper-large-v3",
+                    response_format="verbose_json",
+                )
+
+                # Update UI with transcription
+                self.root.after(
+                    0, lambda: self._update_input_with_transcription(transcription.text)
+                )
+
+        except Exception as e:
+            error_msg = f"Error transcribing audio: {str(e)}"
+            self.root.after(0, lambda: self._update_input_with_transcription(error_msg))
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(filename)
+            except:
+                pass
+            self.status_var.set("Ready")
+
+    def _update_input_with_transcription(self, text):
+        """Update the input area with the transcribed text"""
+        self.input_area.delete("1.0", tk.END)
+        self.input_area.insert("1.0", text)
+
     def _show_loading(self):
         """Show loading spinner"""
         self.loading = True
-        self.output_area.pack_forget()
+        # Don't hide the output area, just show the spinner on top
         self.loading_canvas.pack(fill=tk.BOTH, expand=True)
         self.spinner.start()
         self.status_var.set("Processing your request...")
@@ -295,7 +407,6 @@ class BuddyAIDesktopApp:
         self.loading = False
         self.spinner.stop()
         self.loading_canvas.pack_forget()
-        self.output_area.pack(fill=tk.BOTH, expand=True)
         self.status_var.set("Ready")
 
     def _clean_output(self, text: str) -> str:
@@ -377,8 +488,6 @@ class BuddyAIDesktopApp:
         self.output_area.configure(state=tk.NORMAL)
 
         # Add timestamp
-        from datetime import datetime
-
         timestamp = datetime.now().strftime("%H:%M")
 
         # Determine if it's a user or assistant message

@@ -57,6 +57,8 @@ temperature = 0.0                          # Controls randomness for vision mode
 #extra_chromium_args = []
 # Path to a Chrome instance to use to connect to your normal browser
 # e.g. '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    # For Windows: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    # For Linux: '/usr/bin/google-chrome'
 #chrome_instance_path = ""
 # Connect to a browser instance via WebSocket
 #wss_url = ""

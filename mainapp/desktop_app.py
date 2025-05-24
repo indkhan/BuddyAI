@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk
 import threading
 from typing import Optional
+from tkinter import font as tkfont
 
 from app.agent.manus import Manus
 from app.logger import logger
@@ -14,14 +15,32 @@ class UdsopDesktopApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("UdS_OP Desktop Assistant")
-        self.root.geometry("900x700")
-        self.root.minsize(700, 500)
+        self.root.title("BuddyAI Assistant")
+        self.root.geometry("1000x800")
+        self.root.minsize(800, 600)
+
+        # Set theme colors
+        self.colors = {
+            "bg": "#1e1e1e",
+            "fg": "#ffffff",
+            "accent": "#0078d4",
+            "secondary": "#2d2d2d",
+            "text": "#ffffff",
+            "input_bg": "#2d2d2d",
+            "button_bg": "#0078d4",
+            "button_hover": "#106ebe",
+            "message_bg": "#2d2d2d",
+            "user_message_bg": "#0078d4",
+            "assistant_message_bg": "#2d2d2d",
+        }
 
         # Initialize the agent
         self.agent = Manus()
         self.processing = False
-        self.web_mode = False  # Flag to track if we're in web mode
+        self.web_mode = False
+
+        # Configure root window
+        self.root.configure(bg=self.colors["bg"])
 
         # Apply styling
         self._apply_styling()
@@ -31,130 +50,151 @@ class UdsopDesktopApp:
 
         # Welcome message
         self._append_to_output(
-            "Assistant: Welcome to the UdS_OP Desktop Assistant! Type your instruction or question below."
+            "Assistant: Welcome to BuddyAI! I'm here to help you with any task. How can I assist you today?"
         )
 
     def _apply_styling(self):
-        """Apply styling to the application"""
+        """Apply modern styling to the application"""
         style = ttk.Style()
 
-        # Set theme if available
-        try:
-            style.theme_use("clam")  # 'clam', 'alt', 'default', 'classic'
-        except tk.TclError:
-            pass  # Theme not available
+        # Configure custom styles
+        style.configure("Modern.TFrame", background=self.colors["bg"])
 
-        # Configure styles
-        style.configure("TFrame", background="#f5f5f5")
-        style.configure("TLabelframe", background="#f5f5f5")
         style.configure(
-            "TLabelframe.Label",
-            foreground="#333333",
-            background="#f5f5f5",
-            font=("TkDefaultFont", 10, "bold"),
+            "Modern.TLabelframe",
+            background=self.colors["bg"],
+            foreground=self.colors["text"],
         )
+
         style.configure(
-            "TButton",
-            foreground="#333333",
-            background="#dddddd",
-            font=("TkDefaultFont", 10),
+            "Modern.TLabelframe.Label",
+            background=self.colors["bg"],
+            foreground=self.colors["text"],
+            font=("Segoe UI", 10),
         )
+
+        style.configure(
+            "Modern.TButton",
+            background=self.colors["button_bg"],
+            foreground=self.colors["text"],
+            font=("Segoe UI", 10),
+            borderwidth=0,
+            focusthickness=0,
+            focuscolor=self.colors["button_bg"],
+        )
+
         style.map(
-            "TButton",
-            foreground=[("pressed", "#000000"), ("active", "#000000")],
-            background=[("pressed", "#cccccc"), ("active", "#eeeeee")],
-        )
-        style.configure(
-            "TLabel",
-            foreground="#333333",
-            background="#f5f5f5",
-            font=("TkDefaultFont", 10),
+            "Modern.TButton",
+            background=[
+                ("active", self.colors["button_hover"]),
+                ("pressed", self.colors["button_hover"]),
+            ],
+            foreground=[
+                ("active", self.colors["text"]),
+                ("pressed", self.colors["text"]),
+            ],
         )
 
-        # Web button style
         style.configure(
             "Web.TButton",
-            foreground="#ffffff",
-            background="#4285f4",
-            font=("TkDefaultFont", 10, "bold"),
-        )
-        style.map(
-            "Web.TButton",
-            foreground=[("pressed", "#ffffff"), ("active", "#ffffff")],
-            background=[("pressed", "#3367d6"), ("active", "#5294ff")],
+            background=self.colors["accent"],
+            foreground=self.colors["text"],
+            font=("Segoe UI", 10, "bold"),
+            borderwidth=0,
         )
 
-        # Active web mode style
-        style.configure(
-            "WebMode.TButton",
-            foreground="#ffffff",
-            background="#34a853",  # Green color when active
-            font=("TkDefaultFont", 10, "bold"),
-        )
         style.map(
-            "WebMode.TButton",
-            foreground=[("pressed", "#ffffff"), ("active", "#ffffff")],
-            background=[("pressed", "#2e7d32"), ("active", "#38b656")],
+            "Web.TButton",
+            background=[
+                ("active", self.colors["button_hover"]),
+                ("pressed", self.colors["button_hover"]),
+            ],
+            foreground=[
+                ("active", self.colors["text"]),
+                ("pressed", self.colors["text"]),
+            ],
         )
 
     def _create_ui(self):
-        """Create the user interface"""
-        # Main frame
-        main_frame = ttk.Frame(self.root, padding="10")
+        """Create the modern user interface"""
+        # Main container
+        main_frame = ttk.Frame(self.root, style="Modern.TFrame", padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Top bar with Web button
-        top_frame = ttk.Frame(main_frame)
-        top_frame.pack(fill=tk.X, padx=5, pady=5)
+        top_frame = ttk.Frame(main_frame, style="Modern.TFrame")
+        top_frame.pack(fill=tk.X, pady=(0, 20))
 
-        # Spacer to push the web button to the right
-        spacer = ttk.Label(top_frame, text="")
-        spacer.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Title
+        title_font = tkfont.Font(family="Segoe UI", size=16, weight="bold")
+        title_label = ttk.Label(
+            top_frame,
+            text="BuddyAI",
+            font=title_font,
+            background=self.colors["bg"],
+            foreground=self.colors["text"],
+        )
+        title_label.pack(side=tk.LEFT)
 
-        # Web button in the top right corner
+        # Web button
         self.web_button = ttk.Button(
-            top_frame, text="Web", command=self._toggle_web_mode, style="Web.TButton"
+            top_frame,
+            text="Web Mode",
+            command=self._toggle_web_mode,
+            style="Web.TButton",
+            padding=(15, 8),
         )
         self.web_button.pack(side=tk.RIGHT)
 
-        # Middle section - Conversation history
-        self.output_frame = ttk.LabelFrame(main_frame, text="Conversation History")
-        self.output_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Chat area
+        self.output_frame = ttk.LabelFrame(
+            main_frame, text="Conversation", style="Modern.TLabelframe", padding="10"
+        )
+        self.output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+
+        # Custom font for chat
+        chat_font = tkfont.Font(family="Segoe UI", size=10)
 
         self.output_area = scrolledtext.ScrolledText(
             self.output_frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
-            width=70,
-            height=20,
-            font=("TkDefaultFont", 10),
-            background="#ffffff",
+            font=chat_font,
+            background=self.colors["bg"],
+            foreground=self.colors["text"],
+            insertbackground=self.colors["text"],
+            relief=tk.FLAT,
+            padx=10,
+            pady=10,
         )
-        self.output_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.output_area.pack(fill=tk.BOTH, expand=True)
 
-        # Bottom section - Input
-        input_frame = ttk.Frame(main_frame, padding="5")
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.input_label = ttk.Label(input_frame, text="Your instruction or question:")
-        self.input_label.pack(anchor=tk.W, padx=5)
-
-        input_box_frame = ttk.Frame(input_frame)
-        input_box_frame.pack(fill=tk.X, expand=True)
+        # Input area
+        input_frame = ttk.Frame(main_frame, style="Modern.TFrame")
+        input_frame.pack(fill=tk.X)
 
         self.input_area = scrolledtext.ScrolledText(
-            input_box_frame,
+            input_frame,
             wrap=tk.WORD,
-            height=4,
-            font=("TkDefaultFont", 10),
-            background="#ffffff",
+            height=3,
+            font=chat_font,
+            background=self.colors["input_bg"],
+            foreground=self.colors["text"],
+            insertbackground=self.colors["text"],
+            relief=tk.FLAT,
+            padx=10,
+            pady=10,
         )
-        self.input_area.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.input_area.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         self.input_area.bind("<Return>", self._on_enter)
         self.input_area.bind("<Control-Return>", self._insert_newline)
 
         self.submit_button = ttk.Button(
-            input_box_frame, text="Submit", command=self._process_input, style="TButton"
+            input_frame,
+            text="Send",
+            command=self._process_input,
+            style="Modern.TButton",
+            padding=(20, 10),
         )
         self.submit_button.pack(side=tk.RIGHT)
 
@@ -163,9 +203,10 @@ class UdsopDesktopApp:
         self.status_bar = ttk.Label(
             self.root,
             textvariable=self.status_var,
-            relief=tk.SUNKEN,
-            anchor=tk.W,
-            padding=(5, 2),
+            background=self.colors["secondary"],
+            foreground=self.colors["text"],
+            padding=(10, 5),
+            font=("Segoe UI", 9),
         )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -367,13 +408,44 @@ class UdsopDesktopApp:
         self.submit_button.configure(state=tk.NORMAL)
 
     def _append_to_output(self, text: str):
-        """Append text to the output area"""
+        """Append text to the output area with modern styling"""
         self.output_area.configure(state=tk.NORMAL)
-        if self.output_area.index(tk.END) != "1.0":
-            self.output_area.insert(tk.END, "\n\n")
-        self.output_area.insert(tk.END, text)
-        self.output_area.configure(state=tk.DISABLED)
+
+        # Add timestamp
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%H:%M")
+
+        # Determine if it's a user or assistant message
+        if text.startswith("You:"):
+            bg_color = self.colors["user_message_bg"]
+            prefix = f"[{timestamp}] You:"
+        else:
+            bg_color = self.colors["assistant_message_bg"]
+            prefix = f"[{timestamp}] {text.split(':')[0]}:"
+            text = text.split(":", 1)[1].strip()
+
+        # Create message bubble
+        self.output_area.insert(tk.END, f"\n{prefix}\n", "prefix")
+        self.output_area.insert(tk.END, f"{text}\n", "message")
+
+        # Configure tags for styling
+        self.output_area.tag_configure(
+            "prefix", foreground="#888888", spacing1=10, spacing3=5
+        )
+        self.output_area.tag_configure(
+            "message",
+            background=bg_color,
+            foreground=self.colors["text"],
+            spacing1=5,
+            spacing3=10,
+            lmargin1=20,
+            lmargin2=20,
+            rmargin=20,
+        )
+
         self.output_area.see(tk.END)
+        self.output_area.configure(state=tk.DISABLED)
 
 
 class OutputCollector:

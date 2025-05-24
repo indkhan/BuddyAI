@@ -5,7 +5,7 @@ from tkinter import scrolledtext, ttk
 import threading
 from typing import Optional
 
-from app.agent.udsop import udsop
+from app.agent.manus import Manus
 from app.logger import logger
 
 
@@ -19,7 +19,7 @@ class UdsopDesktopApp:
         self.root.minsize(700, 500)
 
         # Initialize the agent
-        self.agent = udsop()
+        self.agent = Manus()
         self.processing = False
         self.web_mode = False  # Flag to track if we're in web mode
 
